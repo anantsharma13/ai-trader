@@ -18,11 +18,13 @@
     "robots-parser": "^3.0.1",
     "rss-parser": "^3.13.0",
     "technicalindicators": "^3.1.0",
+    "ws": "^8.21.0",
     "yahoo-finance2": "^2.13.0",
     "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }
