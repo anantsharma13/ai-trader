@@ -377,7 +377,11 @@ async function main(): Promise<void> {
   )
 }
 
-main().catch((err: unknown) => {
-  logger.fatal({ err }, 'orchestrator failed — unhandled error')
-  process.exit(1)
-})
+main()
+  .then(() => {
+    process.exit(0)
+  })
+  .catch((err: unknown) => {
+    logger.fatal({ err }, 'orchestrator failed — unhandled error')
+    process.exit(1)
+  })
