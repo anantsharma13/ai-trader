@@ -1,0 +1,15 @@
+{
+  "llmProvider": "azure",
+  "topN": 5,
+  "maxCandidates": 15,
+  "startingCapital": 100000,
+  "maxPositionPct": 0.20,
+  "maxPositions": 8,
+  "stopLossPct": 0.07,
+  "rssFeedUrls": [
+    "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
+    "https://www.moneycontrol.com/rss/buzzingstocks.xml",
+    "https://feeds.feedburner.com/NSEBSE"
+  ],
+  "dryRun": false
+}
