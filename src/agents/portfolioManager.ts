@@ -42,9 +42,25 @@ export function createPortfolioManagerAgent(model: Model, tools: AgentTools): Ag
     model,
     systemPrompt,
     tools: [tools.getOpenPositionsTool, tools.getPortfolioTool],
-    structuredOutputSchema: portfolioManagerOutputSchema,
+    // structuredOutputSchema disabled due to Azure OpenAI tool forcing incompatibility
+    // Parse JSON from response text instead
     printer: false,
     name: 'PortfolioManagerAgent',
     description: 'Converts consensus recommendations into concrete order intents with position sizing',
   })
+}
+
+/**
+ * Parse portfolio manager output from text response.
+ * Handles cases where model returns JSON without using structured output tool.
+ */
+export function parsePortfolioManagerOutput(text: string): PortfolioManagerOutput {
+  // Extract JSON from markdown code blocks or raw text
+  const jsonMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || text.match(/(\{[\s\S]*\})/)
+  if (!jsonMatch) {
+    throw new Error('No JSON found in portfolio manager response')
+  }
+
+  const parsed = JSON.parse(jsonMatch[1])
+  return portfolioManagerOutputSchema.parse(parsed)
 }
