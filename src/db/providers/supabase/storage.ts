@@ -27,7 +27,7 @@ export function createStorageRepo(): StorageRepo {
           const supabase = getSupabaseClient()
 
           const { error: uploadError } = await supabase.storage
-            .from('reports')
+            .from('ai-trading-reports')
             .upload(filename, html, { contentType: 'text/html', upsert: true })
 
           if (uploadError) {
@@ -38,7 +38,7 @@ export function createStorageRepo(): StorageRepo {
           }
 
           const { data } = supabase.storage
-            .from('reports')
+            .from('ai-trading-reports')
             .getPublicUrl(filename)
 
           return data.publicUrl

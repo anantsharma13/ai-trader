@@ -55,6 +55,10 @@ NODE_ENV=development
 -- paste contents of supabase/schema.sql
 ```
 
+**Create storage bucket** (in Supabase Storage dashboard):
+- Bucket name: `ai-trading-reports`
+- Public bucket: Yes (for HTML report access)
+
 ---
 
 ## Running locally
