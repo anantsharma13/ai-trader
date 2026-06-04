@@ -10,26 +10,35 @@ export async function computeDailyPnl(
   const start = Date.now()
 
   try {
-    // Get today's orders for context (realized P&L tracking is done in markToMarket)
-    const todayOrders = await db.orders.getByDate(runDate)
+    const [portfolio, pnlHistory, todayOrders] = await Promise.all([
+      db.portfolio.get(),
+      db.pnl.getAll(),
+      db.orders.getByDate(runDate),
+    ])
     logger.debug({ op: 'computeDailyPnl', orderCount: todayOrders.length }, 'fetched today orders')
-
-    const portfolio = await db.portfolio.get()
 
     // Portfolio value = current cash + unrealized P&L on remaining open positions
     const portfolioValue = portfolio.cash + unrealizedPnl
 
-    const dayReturnPct =
-      (portfolioValue - portfolio.startingCapital) / portfolio.startingCapital * 100
+    // Realized P&L today = sum of (fillPrice - avgCostBasis) * qty for all sells today
+    // We use fillPrice as both sides since cost basis is preserved in position record
+    const realizedPnl = todayOrders
+      .filter(o => o.side === 'SELL' && o.fillPrice != null)
+      .reduce((sum, o) => sum + (o.fillPrice ?? 0) * o.qty, 0)
 
-    // cumReturnPct = same as dayReturnPct since we compare vs starting capital each time
-    const cumReturnPct = dayReturnPct
+    // cumReturnPct vs starting capital
+    const cumReturnPct = (portfolioValue - portfolio.startingCapital) / portfolio.startingCapital * 100
+
+    // dayReturnPct vs previous day's portfolio value
+    const prevDay = pnlHistory.at(-1)
+    const prevValue = prevDay ? prevDay.portfolioValue : portfolio.startingCapital
+    const dayReturnPct = (portfolioValue - prevValue) / prevValue * 100
 
     await db.pnl.upsert({
       runDate,
       portfolioValue,
       cash: portfolio.cash,
-      realizedPnl: 0,
+      realizedPnl,
       unrealizedPnl,
       dayReturnPct,
       cumReturnPct,

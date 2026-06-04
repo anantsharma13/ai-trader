@@ -108,15 +108,15 @@ export function createPositionsRepo(): PositionsRepo {
       }
     },
 
-    async close(symbol: string, closePrice: number) {
-      logger.info({ op: 'positions.close', symbol, closePrice }, 'positions.close entry')
+    async close(symbol: string) {
+      logger.info({ op: 'positions.close', symbol }, 'positions.close entry')
       const start = Date.now()
       try {
         await withRetry(async () => {
           const supabase = getSupabaseClient()
           const { error } = await supabase
             .from('positions')
-            .update({ status: 'closed', avg_price: closePrice })
+            .update({ status: 'closed' })
             .eq('symbol', symbol)
             .eq('status', 'open')
 

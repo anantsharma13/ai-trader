@@ -38,36 +38,60 @@ export async function fillOrders(
       })
 
       if (order.side === 'BUY') {
-        await db.positions.upsert({
-          symbol: order.symbol,
-          qty: order.qty,
-          avgPrice: fill.fillPrice,
-          openedAt: runDate,
-          status: 'open',
-        })
+        // Merge into existing open position (weighted avg cost basis)
+        const openPositions = await db.positions.getOpen()
+        const existing = openPositions.find(p => p.symbol === order.symbol)
+        if (existing) {
+          const totalQty = existing.qty + order.qty
+          const avgPrice = (existing.avgPrice * existing.qty + fill.fillPrice * order.qty) / totalQty
+          await db.positions.upsert({
+            ...existing,
+            qty: totalQty,
+            avgPrice,
+          })
+        } else {
+          await db.positions.upsert({
+            symbol: order.symbol,
+            qty: order.qty,
+            avgPrice: fill.fillPrice,
+            openedAt: runDate,
+            status: 'open',
+          })
+        }
 
         // Deduct cost from cash
         const portfolio = await db.portfolio.get()
         const newCash = portfolio.cash - fill.fillPrice * order.qty
         await db.portfolio.updateCash(newCash)
       } else {
-        // SELL — close position and compute realized P&L
+        // SELL — partial or full close
         const openPositions = await db.positions.getOpen()
         const position = openPositions.find(p => p.symbol === order.symbol)
 
-        await db.positions.close(order.symbol, fill.fillPrice)
-
-        if (position) {
-          const realizedPnl = (fill.fillPrice - position.avgPrice) * order.qty
-          logger.info(
-            { op: 'fill', symbol: order.symbol, side: 'SELL', realizedPnl },
-            'realized P&L on sell',
-          )
+        if (!position) {
+          logger.warn({ op: 'fill', symbol: order.symbol }, 'sell order for unknown position — skipping')
+          continue
         }
+
+        // Guard: can't sell more than held
+        const sellQty = Math.min(order.qty, position.qty)
+        const remainingQty = position.qty - sellQty
+
+        if (remainingQty <= 0) {
+          await db.positions.close(order.symbol)
+        } else {
+          await db.positions.upsert({ ...position, qty: remainingQty })
+        }
+
+        const realizedPnl = (fill.fillPrice - position.avgPrice) * sellQty
+        logger.info(
+          { op: 'fill', symbol: order.symbol, side: 'SELL', sellQty, remainingQty, realizedPnl },
+          'realized P&L on sell',
+        )
 
         // Add proceeds to cash
         const portfolio = await db.portfolio.get()
-        const newCash = portfolio.cash + fill.fillPrice * order.qty
+        const newCash = portfolio.cash + fill.fillPrice * sellQty
         await db.portfolio.updateCash(newCash)
       }
 

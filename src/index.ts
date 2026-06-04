@@ -20,6 +20,17 @@ import type { AgentResult } from '@strands-agents/sdk'
 // Helpers
 // ---------------------------------------------------------------------------
 
+const AGENT_TIMEOUT_MS = 60_000
+
+async function invokeAgent(agent: { invoke(prompt: string): Promise<AgentResult> }, prompt: string, label: string): Promise<AgentResult> {
+  return Promise.race([
+    agent.invoke(prompt),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label}: agent timed out after ${AGENT_TIMEOUT_MS}ms`)), AGENT_TIMEOUT_MS),
+    ),
+  ])
+}
+
 /**
  * Extract typed structured output from an AgentResult, falling back to
  * parsing the AgentResult.toString() as JSON when structuredOutput is absent.
@@ -87,7 +98,7 @@ async function main(): Promise<void> {
 
   try {
     const prompt = `Scan RSS feeds and Google News for Indian stock market news from ${runDate}. Identify 10-15 Nifty 50 or Next 50 stocks with news catalysts today.`
-    const result = await agents.discovery.invoke(prompt)
+    const result = await invokeAgent(agents.discovery, prompt, 'discovery')
     discoveryOutput = extractOutput<DiscoveryOutput>(result, 'discovery')
     logger.info(
       { op: 'step.discovery', ms: Date.now() - discoveryStart, candidateCount: discoveryOutput.candidates.length },
@@ -124,7 +135,7 @@ async function main(): Promise<void> {
 
   try {
     const prompt = `Perform technical analysis for the following NSE symbols: ${JSON.stringify(resolvedSymbols)}. Use the available tools to fetch quotes, history, and indicators.`
-    const result = await agents.technical.invoke(prompt)
+    const result = await invokeAgent(agents.technical, prompt, 'technical')
     technicalOutput = extractOutput<TechnicalOutput>(result, 'technical')
     logger.info(
       { op: 'step.technical', ms: Date.now() - technicalStart, ratingCount: technicalOutput.ratings.length },
@@ -144,7 +155,7 @@ async function main(): Promise<void> {
 
   try {
     const prompt = `Assess current Indian macro-economic and sector conditions for ${runDate}. Identify systemic risks and determine whether new long positions should be taken today.`
-    const result = await agents.macro.invoke(prompt)
+    const result = await invokeAgent(agents.macro, prompt, 'macro')
     macroOutput = extractOutput<MacroOutput>(result, 'macro')
     logger.info(
       { op: 'step.macro', ms: Date.now() - macroStart, riskLevel: macroOutput.riskLevel, allowNewLongs: macroOutput.allowNewLongs },
@@ -155,13 +166,6 @@ async function main(): Promise<void> {
     throw err
   }
 
-  // Gate: skip new buys when macro risk is high and longs are blocked
-  if (macroOutput.riskLevel === 'high' && !macroOutput.allowNewLongs) {
-    logger.warn(
-      { op: 'step.macro', flags: macroOutput.flags },
-      'macro risk HIGH and allowNewLongs=false — new long positions will be blocked at risk gate',
-    )
-  }
 
   // -------------------------------------------------------------------------
   // Step 4: Consensus
@@ -172,7 +176,7 @@ async function main(): Promise<void> {
 
   try {
     const consensusInput = JSON.stringify({ discovery: discoveryOutput, technical: technicalOutput, macro: macroOutput })
-    const result = await agents.consensus.invoke(consensusInput)
+    const result = await invokeAgent(agents.consensus, consensusInput, 'consensus')
     consensusOutput = extractOutput<ConsensusOutput>(result, 'consensus')
 
     // Filter to top N per config
@@ -207,7 +211,7 @@ async function main(): Promise<void> {
         startingCapital: config.startingCapital,
       },
     })
-    const result = await agents.portfolioManager.invoke(pmInput)
+    const result = await invokeAgent(agents.portfolioManager, pmInput, 'portfolioManager')
     pmOutput = extractOutput<PortfolioManagerOutput>(result, 'portfolioManager')
     logger.info(
       { op: 'step.portfolioManager', ms: Date.now() - pmStart, intentCount: pmOutput.intents.length },
@@ -219,10 +223,20 @@ async function main(): Promise<void> {
   }
 
   // Normalize side to uppercase for the engine layer (portfolioManager uses 'buy'/'sell')
-  const rawIntents: EngineOrderIntent[] = pmOutput.intents.map((i) => ({
+  let rawIntents: EngineOrderIntent[] = pmOutput.intents.map((i) => ({
     ...i,
     side: i.side.toUpperCase() as 'BUY' | 'SELL',
   }))
+
+  // Enforce macro gate — block new BUY intents when macro flags high risk
+  if (macroOutput.riskLevel === 'high' && !macroOutput.allowNewLongs) {
+    const before = rawIntents.length
+    rawIntents = rawIntents.filter(i => i.side !== 'BUY')
+    logger.warn(
+      { op: 'step.macroGate', blocked: before - rawIntents.length },
+      'macro HIGH — blocked all new buy intents',
+    )
+  }
 
   // -------------------------------------------------------------------------
   // Step 6: Risk gate + fill orders
@@ -278,8 +292,14 @@ async function main(): Promise<void> {
       'step.riskGate exit',
     )
 
-    // Fill approved orders
-    if (gateResult.approved.length > 0) {
+    // Idempotency: skip fill if orders already recorded for today (re-run protection)
+    const existingOrders = await db.orders.getByDate(runDate)
+    if (existingOrders.length > 0) {
+      logger.warn(
+        { op: 'step.fillOrders', existingCount: existingOrders.length, runDate },
+        'orders already exist for today — skipping fill to prevent duplicate execution',
+      )
+    } else if (gateResult.approved.length > 0) {
       logger.info({ op: 'step.fillOrders', approvedCount: gateResult.approved.length }, 'step.fillOrders entry')
       const fillStart = Date.now()
       try {

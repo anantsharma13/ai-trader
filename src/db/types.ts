@@ -48,7 +48,7 @@ export interface PortfolioRepo {
 export interface PositionsRepo {
   getOpen(): Promise<Position[]>
   upsert(p: Position): Promise<void>
-  close(symbol: string, closePrice: number): Promise<void>
+  close(symbol: string): Promise<void>
 }
 
 export interface OrdersRepo {

@@ -33,7 +33,19 @@ export function applyRiskGate(
 
   for (const rawIntent of intents) {
     if (rawIntent.side === 'SELL') {
-      // SELL always approved — LLM already owns it per position data
+      // Validate sell qty against actual held position
+      const position = openPositions.find(p => p.symbol === rawIntent.symbol)
+      if (!position) {
+        rejected.push({ intent: rawIntent, reason: 'no open position to sell' })
+        logger.warn({ op: 'riskGate.apply', symbol: rawIntent.symbol }, 'rejected sell: no open position')
+        continue
+      }
+      if (rawIntent.qty > position.qty) {
+        // Clip to held qty rather than reject — partial sell is valid
+        approved.push({ ...rawIntent, qty: position.qty })
+        logger.warn({ op: 'riskGate.apply', symbol: rawIntent.symbol, requestedQty: rawIntent.qty, heldQty: position.qty }, 'sell qty clipped to held qty')
+        continue
+      }
       approved.push(rawIntent)
       logger.debug({ op: 'riskGate.apply', symbol: rawIntent.symbol, side: 'SELL' }, 'approved sell')
       continue

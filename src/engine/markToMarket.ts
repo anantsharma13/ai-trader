@@ -34,7 +34,6 @@ export async function markToMarket(
             'stop-loss triggered, auto-selling',
           )
 
-          // Insert auto-sell order
           await db.orders.insert({
             runDate,
             symbol: position.symbol,
@@ -42,11 +41,11 @@ export async function markToMarket(
             qty: position.qty,
             fillPrice: currentPrice,
             rationale: `Stop-loss triggered: ${(unrealizedGainPct * 100).toFixed(2)}% loss exceeds ${(config.stopLossPct * 100).toFixed(2)}% limit`,
-            confidence: 1,
+            confidence: 0,
             signals: { stopLoss: true, unrealizedGainPct, stopLossPct: config.stopLossPct },
           })
 
-          await db.positions.close(position.symbol, currentPrice)
+          await db.positions.close(position.symbol)
 
           // Add proceeds to cash
           const portfolio = await db.portfolio.get()
@@ -58,11 +57,11 @@ export async function markToMarket(
           unrealizedPnl += (currentPrice - position.avgPrice) * position.qty
         }
       } catch (err: unknown) {
+        // Log and continue — one bad quote shouldn't block all other positions
         logger.error(
           { op: 'markToMarket', symbol: position.symbol, err },
-          'failed to mark position to market',
+          'failed to mark position to market — skipping',
         )
-        throw err
       }
     }
 
