@@ -21,6 +21,10 @@ export function createAzureModel(): LLMModel {
     api: 'chat',
     modelId: env.AZURE_OPENAI_DEPLOYMENT,
     client: azureClient,
+    params: {
+      // Enable JSON mode for Azure OpenAI structured outputs
+      response_format: { type: 'json_object' },
+    },
   })
 }
 
